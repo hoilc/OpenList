@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -177,15 +178,66 @@ func doMakeFile(fileSlice []string, taskID string, uploadAddress string) (*sdkUs
 	}
 	fmt.Printf("创建文件响应成功: StatusCode=%d\n", httpResponse.StatusCode)
 	b, _ := io.ReadAll(httpResponse.Body)
+
 	// 打印响应的JSON内容，便于调试
 	fmt.Printf("创建文件响应JSON: %s\n", string(b))
-	var result *sdkUserFile.File
+
+	// 使用map来解析响应，避免结构体标签问题
+	var result map[string]interface{}
 	err = json.Unmarshal(b, &result)
 	if err != nil {
 		fmt.Printf("解析创建文件响应失败: %v\n", err)
 		return nil, err
 	}
-	return result, nil
+
+	// 手动构建sdkUserFile.File对象，根据实际返回的JSON结构
+	file := &sdkUserFile.File{}
+
+	// 从响应中提取path字段
+	if pathVal, ok := result["path"]; ok {
+		if pathStr, ok := pathVal.(string); ok {
+			file.Path = pathStr
+			// 从路径中提取文件名作为Name字段
+			file.Name = path.Base(pathStr)
+		}
+	}
+
+	// 提取identity字段（只使用content_identity，忽略user_identity）
+	if identity, ok := result["content_identity"]; ok {
+		if identityStr, ok := identity.(string); ok {
+			file.Identity = identityStr
+		}
+	}
+
+	// 提取size字段
+	if size, ok := result["size"]; ok {
+		switch v := size.(type) {
+		case string:
+			if sizeInt, err := strconv.ParseInt(v, 10, 64); err == nil {
+				file.Size = sizeInt
+			}
+		case float64:
+			file.Size = int64(v)
+		case int64:
+			file.Size = v
+		case int:
+			file.Size = int64(v)
+		case json.Number:
+			if sizeInt, err := v.Int64(); err == nil {
+				file.Size = sizeInt
+			}
+		}
+	}
+
+	// 文件默认不是目录
+	file.Dir = false
+
+	// 设置默认时间戳
+	currentTs := time.Now().UnixMilli()
+	file.CreateTs = currentTs
+	file.UpdateTs = currentTs
+
+	return file, nil
 }
 
 func postFileSlice(ctx context.Context, fileSlice []byte, taskID string, uploadAddress string, preix cid.Prefix, retry int) (cid.Cid, error) {
