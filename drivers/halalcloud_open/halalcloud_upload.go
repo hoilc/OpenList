@@ -51,11 +51,7 @@ func (d *HalalCloudOpen) put(ctx context.Context, dstDir model.Obj, fileStream m
 		Version:  1,
 	}
 	blockSize := uploadTask.BlockSize
-	useSingleUpload := true
-	//
-	if fileStream.GetSize() <= int64(blockSize) || d.uploadThread <= 1 {
-		useSingleUpload = true
-	}
+	
 	// Not sure whether FileStream supports concurrent read and write operations, so currently using single-threaded upload to ensure safety.
 	// read file
 	reader := driver.NewLimitedUploadStream(ctx, fileStream)
@@ -94,6 +90,7 @@ func (d *HalalCloudOpen) put(ctx context.Context, dstDir model.Obj, fileStream m
 			break
 		}
 	}
+	
 	newFile, err := makeFile(ctx, slicesList, uploadTask.Task, uploadTask.UploadAddress, retryTimes)
 	if err != nil {
 		return nil, err
