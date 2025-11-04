@@ -58,45 +58,40 @@ func (d *HalalCloudOpen) put(ctx context.Context, dstDir model.Obj, fileStream m
 	}
 	// Not sure whether FileStream supports concurrent read and write operations, so currently using single-threaded upload to ensure safety.
 	// read file
-	if useSingleUpload {
-		bufferSize := int(blockSize)
-		buffer := make([]byte, bufferSize)
-		reader := driver.NewLimitedUploadStream(ctx, fileStream)
-		teeReader := io.TeeReader(reader, driver.NewProgress(fileStream.GetSize(), up))
-		// fileStream.Seek(0, os.SEEK_SET)
-		for {
-			n, err := teeReader.Read(buffer)
-			if n > 0 {
-				data := buffer[:n]
-				uploadCid, err := postFileSlice(ctx, data, uploadTask.Task, uploadTask.UploadAddress, prefix, retryTimes)
-				if err != nil {
-					return nil, err
-				}
-				slicesList = append(slicesList, uploadCid.String())
-			}
-			if err == io.EOF || n == 0 {
-				break
-			}
+	reader := driver.NewLimitedUploadStream(ctx, fileStream)
+	progressReader := driver.NewProgress(fileStream.GetSize(), up)
+	teeReader := io.TeeReader(reader, progressReader)
+	
+	totalRead := int64(0)
+	for totalRead < fileStream.GetSize() {
+		// 计算当前块应该读取的大小
+		remaining := fileStream.GetSize() - totalRead
+		currentBlockSize := int64(blockSize)
+		if remaining < currentBlockSize {
+			currentBlockSize = remaining
 		}
-	} else {
-		// TODO: implement multipart upload, currently using single-threaded upload to ensure safety.
-		bufferSize := int(blockSize)
-		buffer := make([]byte, bufferSize)
-		reader := driver.NewLimitedUploadStream(ctx, fileStream)
-		teeReader := io.TeeReader(reader, driver.NewProgress(fileStream.GetSize(), up))
-		for {
-			n, err := teeReader.Read(buffer)
-			if n > 0 {
-				data := buffer[:n]
-				uploadCid, err := postFileSlice(ctx, data, uploadTask.Task, uploadTask.UploadAddress, prefix, retryTimes)
-				if err != nil {
-					return nil, err
-				}
-				slicesList = append(slicesList, uploadCid.String())
+		
+		// 创建适当大小的缓冲区
+		buffer := make([]byte, currentBlockSize)
+		
+		// 读取完整的一块数据
+		n, err := io.ReadFull(teeReader, buffer)
+		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+			return nil, err
+		}
+		
+		if n > 0 {
+			data := buffer[:n]
+			uploadCid, err := postFileSlice(ctx, data, uploadTask.Task, uploadTask.UploadAddress, prefix, retryTimes)
+			if err != nil {
+				return nil, err
 			}
-			if err == io.EOF || n == 0 {
-				break
-			}
+			slicesList = append(slicesList, uploadCid.String())
+			totalRead += int64(n)
+		}
+		
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			break
 		}
 	}
 	newFile, err := makeFile(ctx, slicesList, uploadTask.Task, uploadTask.UploadAddress, retryTimes)
