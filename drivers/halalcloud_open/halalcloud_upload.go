@@ -55,15 +55,15 @@ func (d *HalalCloudOpen) put(ctx context.Context, dstDir model.Obj, fileStream m
 		Version:  1,
 	}
 	blockSize := uploadTask.BlockSize
-	
+
 	fmt.Printf("开始读取文件并分片上传: BlockSize=%d\n", blockSize)
-	
+
 	// Not sure whether FileStream supports concurrent read and write operations, so currently using single-threaded upload to ensure safety.
 	// read file
 	reader := driver.NewLimitedUploadStream(ctx, fileStream)
 	progressReader := driver.NewProgress(fileStream.GetSize(), up)
 	teeReader := io.TeeReader(reader, progressReader)
-	
+
 	totalRead := int64(0)
 	chunkIndex := 0
 	for totalRead < fileStream.GetSize() {
@@ -73,12 +73,12 @@ func (d *HalalCloudOpen) put(ctx context.Context, dstDir model.Obj, fileStream m
 		if remaining < currentBlockSize {
 			currentBlockSize = remaining
 		}
-		
+
 		fmt.Printf("准备读取第 %d 个块: 应读取 %d 字节, 剩余 %d 字节\n", chunkIndex, currentBlockSize, remaining)
-		
+
 		// 创建适当大小的缓冲区
 		buffer := make([]byte, currentBlockSize)
-		
+
 		// 读取完整的一块数据
 		n, err := io.ReadFull(teeReader, buffer)
 		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
@@ -86,7 +86,7 @@ func (d *HalalCloudOpen) put(ctx context.Context, dstDir model.Obj, fileStream m
 			return nil, err
 		}
 		fmt.Printf("成功读取第 %d 个块: 实际读取 %d 字节\n", chunkIndex, n)
-		
+
 		if n > 0 {
 			data := buffer[:n]
 			fmt.Printf("开始上传第 %d 个块: 大小 %d 字节\n", chunkIndex, len(data))
@@ -100,13 +100,13 @@ func (d *HalalCloudOpen) put(ctx context.Context, dstDir model.Obj, fileStream m
 			totalRead += int64(n)
 			chunkIndex++
 		}
-		
+
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
 			fmt.Println("文件读取完成")
 			break
 		}
 	}
-	
+
 	fmt.Printf("所有块上传完成，开始创建文件: 共 %d 个块\n", len(slicesList))
 	newFile, err := makeFile(ctx, slicesList, uploadTask.Task, uploadTask.UploadAddress, retryTimes)
 	if err != nil {
@@ -177,6 +177,8 @@ func doMakeFile(fileSlice []string, taskID string, uploadAddress string) (*sdkUs
 	}
 	fmt.Printf("创建文件响应成功: StatusCode=%d\n", httpResponse.StatusCode)
 	b, _ := io.ReadAll(httpResponse.Body)
+	// 打印响应的JSON内容，便于调试
+	fmt.Printf("创建文件响应JSON: %s\n", string(b))
 	var result *sdkUserFile.File
 	err = json.Unmarshal(b, &result)
 	if err != nil {
